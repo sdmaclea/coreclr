@@ -173,7 +173,7 @@ namespace System.Reflection
                 throw new NotSupportedException(SR.Format(SR.NotSupported_AppX, "Assembly.Load(byte[], ...)"));
 #endif
 
-            AssemblyLoadContext alc = new IndividualAssemblyLoadContext();
+            AssemblyLoadContext alc = new IndividualAssemblyLoadContext("Assembly.Load(byte[], ...)");
             MemoryStream assemblyStream = new MemoryStream(rawAssembly);
             MemoryStream symbolStream = (rawSymbolStore != null) ? new MemoryStream(rawSymbolStore) : null;
             return alc.LoadFromStream(assemblyStream, symbolStream);
@@ -203,7 +203,7 @@ namespace System.Reflection
             {
                 if (s_loadfile.TryGetValue(normalizedPath, out result))
                     return result;
-                AssemblyLoadContext alc = new IndividualAssemblyLoadContext();
+                AssemblyLoadContext alc = new IndividualAssemblyLoadContext(String.Format("Assembly.LoadFile({1})", path));
                 result = alc.LoadFromAssemblyPath(normalizedPath);
                 s_loadfile.Add(normalizedPath, result);
             }

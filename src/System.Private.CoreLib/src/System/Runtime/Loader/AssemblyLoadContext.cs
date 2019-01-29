@@ -11,7 +11,7 @@ using System.Runtime.InteropServices;
 
 namespace System.Runtime.Loader
 {
-    public abstract class AssemblyLoadContext
+    public class AssemblyLoadContext
     {
         private static readonly Dictionary<long, WeakReference<AssemblyLoadContext>> ContextsToUnload = new Dictionary<long, WeakReference<AssemblyLoadContext>>();
         private static long _nextId;
@@ -41,18 +41,25 @@ namespace System.Runtime.Loader
         [DllImport(JitHelpers.QCall, CharSet = CharSet.Unicode)]
         internal static extern void InternalStartProfile(string profile, IntPtr ptrNativeAssemblyLoadContext);
 
-        protected AssemblyLoadContext() : this(false, false)
+        public AssemblyLoadContext() : this(false, false, null)
         {
         }
 
-        protected AssemblyLoadContext(bool isCollectible) : this(false, isCollectible)
+        public AssemblyLoadContext(bool isCollectible) : this(false, isCollectible, null)
         {
         }
 
-        internal AssemblyLoadContext(bool fRepresentsTPALoadContext, bool isCollectible)
+        public AssemblyLoadContext(string name, bool isCollectible = true) : this(false, isCollectible, name)
+        {
+        }
+
+        internal AssemblyLoadContext(bool fRepresentsTPALoadContext, bool isCollectible, string name)
         {
             // Initialize the VM side of AssemblyLoadContext if not already done.
             IsCollectible = isCollectible;
+
+            Name = name;
+
             // The _unloadLock needs to be assigned after the IsCollectible to ensure proper behavior of the finalizer
             // even in case the following allocation fails or the thread is aborted between these two lines.
             _unloadLock = new object();
@@ -136,13 +143,54 @@ namespace System.Runtime.Loader
 
         public bool IsCollectible { get; }
 
+        public string Name { get; }
+
+        public override string ToString() => "Name: " + Name + "Type: " + GetType().Name + "Id:" + _id;
+
         [DllImport(JitHelpers.QCall, CharSet = CharSet.Unicode)]
         private static extern void LoadFromPath(IntPtr ptrNativeAssemblyLoadContext, string ilPath, string niPath, ObjectHandleOnStack retAssembly);
 
         [MethodImpl(MethodImplOptions.InternalCall)]
         public static extern Assembly[] GetLoadedAssemblies();
 
-        // These methods load assemblies into the current AssemblyLoadContext 
+        public static IEnumerable<AssemblyLoadContext> Contexts
+        {
+            get
+            {
+                Dictionary<AssemblyLoadContext, int> dict = new Dictionary<AssemblyLoadContext, int>();
+
+                foreach (Assembly a in GetLoadedAssemblies())
+                {
+                    AssemblyLoadContext alc = GetLoadContext(a);
+
+                    dict[alc] =  0;
+                }
+
+                return dict.Keys;
+            }
+        }
+
+        public IEnumerable<Assembly> Assemblies
+        {
+            get
+            {
+                Dictionary<Assembly, int> dict = new Dictionary<Assembly, int>();
+
+                foreach (Assembly a in GetLoadedAssemblies())
+                {
+                    AssemblyLoadContext alc = GetLoadContext(a);
+
+                    if (alc == this)
+                    {
+                        dict[a] = 0;
+                    }
+                }
+
+                return dict.Keys;
+            }
+        }
+
+        // These methods load assemblies into the current AssemblyLoadContext
         // They may be used in the implementation of an AssemblyLoadContext derivation
         public Assembly LoadFromAssemblyPath(string assemblyPath)
         {
@@ -270,7 +318,10 @@ namespace System.Runtime.Loader
         // Custom AssemblyLoadContext implementations can override this
         // method to perform custom processing and use one of the protected
         // helpers above to load the assembly.
-        protected abstract Assembly Load(AssemblyName assemblyName);
+        protected virtual Assembly Load(AssemblyName assemblyName)
+        {
+            return null;
+        }
 
         // This method is invoked by the VM when using the host-provided assembly load context
         // implementation.
@@ -474,7 +525,7 @@ namespace System.Runtime.Loader
 
             return AssemblyName.GetAssemblyName(assemblyPath);
         }
-        
+
         [DllImport(JitHelpers.QCall, CharSet = CharSet.Unicode)]
         private static extern IntPtr GetLoadContextForAssembly(RuntimeAssembly assembly);
 
@@ -543,7 +594,7 @@ namespace System.Runtime.Loader
         // Event handler for resolving native libraries.
         // This event is raised if the native library could not be resolved via
         // the default resolution logic [including AssemblyLoadContext.LoadUnmanagedDll()]
-        // 
+        //
         // Inputs: Invoking assembly, and library name to resolve
         // Returns: A handle to the loaded native library
         public event Func<Assembly, string, IntPtr> ResolvingUnmanagedDll;
@@ -551,7 +602,7 @@ namespace System.Runtime.Loader
         // Event handler for resolving managed assemblies.
         // This event is raised if the managed assembly could not be resolved via
         // the default resolution logic [including AssemblyLoadContext.Load()]
-        // 
+        //
         // Inputs: The AssemblyLoadContext and AssemblyName to be loaded
         // Returns: The Loaded assembly object.
         public event Func<AssemblyLoadContext, AssemblyName, Assembly> Resolving;
@@ -650,27 +701,15 @@ namespace System.Runtime.Loader
 
     internal class AppPathAssemblyLoadContext : AssemblyLoadContext
     {
-        internal AppPathAssemblyLoadContext() : base(true, false)
+        internal AppPathAssemblyLoadContext() : base(true, false, "Default")
         {
-        }
-
-        protected override Assembly Load(AssemblyName assemblyName)
-        {
-            // We were loading an assembly into TPA ALC that was not found on TPA list. As a result we are here.
-            // Returning null will result in the AssemblyResolve event subscribers to be invoked to help resolve the assembly.
-            return null;
         }
     }
 
     internal class IndividualAssemblyLoadContext : AssemblyLoadContext
     {
-        internal IndividualAssemblyLoadContext() : base(false, false)
+        internal IndividualAssemblyLoadContext(string name) : base(false, false, name)
         {
-        }
-
-        protected override Assembly Load(AssemblyName assemblyName)
-        {
-            return null;
         }
     }
 }
